@@ -1,0 +1,183 @@
+---
+- name: Check for SHA512 password storage in PAM
+  pamd:
+    name: "{{ item }}"
+    type: password
+    control: sufficient
+    module_path: pam_unix.so
+    module_arguments: 'sha512'
+    state: args_present
+  with_items:
+    - system-auth
+    - password-auth
+  when:
+    - password_sha512_check is defined and password_sha512_check | bool
+  tags:
+    - always
+    - accounts
+    - medium
+    - V-71919
+
+- name: Prevent users with blank or null passwords from authenticating
+  pamd:
+    name: "{{ item }}"
+    type: session
+    control: sufficient
+    module_path: pam_unix.so
+    module_arguments: 'nullok'
+    state: args_absent
+  with_items:
+    - system-auth
+    - password-auth
+  when:
+    - security_disallow_blank_password_login | bool
+  tags:
+    - auth
+    - high
+    - V-71937
+
+- name: Prevent log in to accounts with empty password
+  pamd:
+    name: system-auth
+    type: "{{ item }}"
+    control: sufficient
+    module_path: pam_unix.so
+    module_arguments: 'nullok'
+    state: args_absent
+  with_items:
+    - auth
+    - password
+  when:
+    - security_disallow_blank_password_login | bool
+  tags:
+    - auth
+    - high
+    - V-71937
+
+- name: Prevent log in to accounts with empty password
+  pamd:
+    name: password-auth
+    type: "{{ item }}"
+    control: sufficient
+    module_path: pam_unix.so
+    module_arguments: 'nullok'
+    state: args_absent
+  with_items:
+    - auth
+    - password
+  when:
+    - security_disallow_blank_password_login | bool
+  tags:
+    - auth
+    - high
+    - V-71937
+
+- name: Ensure that users cannot reuse one of their last 5 passwords
+  pamd:
+    name: password-auth
+    type: password
+    control: sufficient
+    module_path: pam_unix.so
+    module_arguments: "remember={{ security_password_remember_password }}"
+    state: args_present
+  when:
+    - security_password_remember_password is defined
+  tags:
+    - accounts
+    - medium
+    - V-71933
+
+- name: Manage faillock module to lock accounts according to policy
+  pamd:
+    name: "{{ item }}"
+    type: auth
+    control: required
+    module_path: pam_unix.so
+    new_type: auth
+    new_control: required
+    new_module_path: pam_faillock.so
+    # yamllint disable rule:line-length
+    module_arguments: 'preauth
+        silent
+        audit
+        deny={{ security_pam_faillock_attempts }}
+        {{ security_pam_faillock_deny_root | bool | ternary("even_deny_root","") }}
+        fail_interval={{ security_pam_faillock_interval }}
+        unlock_time={{ security_pam_faillock_unlock_time }}'
+    state: before
+    # yamllint enable rule:line-length
+  with_items:
+    - system-auth
+    - password-auth
+  when:
+    - security_pam_faillock_enable | bool
+  tags:
+    - auth
+    - medium
+    - V-71943
+    - V-71945
+
+- name: Manage faillock module to lock accounts according to policy
+  pamd:
+    name: "{{ item }}"
+    type: auth
+    control: sufficient
+    module_path: pam_unix.so
+    new_type: auth
+    new_control: '[default=die]'
+    new_module_path: pam_faillock.so
+    # yamllint disable rule:line-length
+    module_arguments: 'authfail
+        audit
+        deny={{ security_pam_faillock_attempts }}
+        {{ security_pam_faillock_deny_root | bool | ternary("even_deny_root","") }}
+        fail_interval={{ security_pam_faillock_interval }}
+        unlock_time={{ security_pam_faillock_unlock_time }}'
+    state: after
+    # yamllint enable rule:line-length
+  with_items:
+    - system-auth
+    - password-auth
+  when:
+    - security_pam_faillock_enable | bool
+  tags:
+    - auth
+    - medium
+    - V-71943
+    - V-71945
+
+- name: Manage faillock module to lock accounts according to policy
+  pamd:
+    name: "{{ item }}"
+    type: account
+    control: required
+    module_path: pam_unix.so
+    new_type: account
+    new_control: required
+    new_module_path: pam_faillock.so
+    state: after
+  with_items:
+    - system-auth
+    - password-auth
+  when:
+    - security_pam_faillock_enable | bool
+  tags:
+    - auth
+    - medium
+    - V-71943
+    - V-71945
+
+- name: Check for pam_lastlog in PAM configuration
+  pamd:
+    name: postlogin
+    type: session
+    control: optional
+    module_path: pam_lastlog.so
+    module_arguments: 'noupdate showfailed'
+    new_control: required
+    state: updated
+  tags:
+    - always
+    - low
+    - auth
+    - V-72275

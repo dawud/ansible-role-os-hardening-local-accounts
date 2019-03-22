@@ -1,0 +1,33 @@
+---
+- name: Add or remove packages based on STIG requirements
+  yum:
+    # yamllint disable-line rule:line-length
+    name: "{{ stig_packages_rhel7 | selectattr('enabled') | selectattr('state', 'equalto', item) | sum(attribute='packages', start=[]) }}"
+    state: "{{ item }}"
+  with_items:
+    # yamllint disable-line rule:line-length
+    - "{{ stig_packages_rhel7 | selectattr('enabled') | map(attribute='state') | unique | list }}"
+  tags:
+    - cat1
+    - auth
+    - packages
+    - services
+    - V-71897
+    - V-71967
+    - V-71969
+    - V-72067
+    - V-72077
+    - V-72213
+    - V-72233
+    - V-72301
+    - V-72307
+
+- include: pwquality.yml
+
+- include: pamd.yml
+
+- include: pam_limits.yml
+
+- include: files.yml
+
+- include: report.yml

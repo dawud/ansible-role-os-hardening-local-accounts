@@ -1,0 +1,74 @@
+---
+## Authentication (auth)
+# Set the package install state for distribution packages
+# Options are 'present' and 'latest'
+security_package_state: present
+stig_id: 'rhel7'
+## Accounts (accounts)
+# Set minimum password lifetime to 1 day for interactive accounts.
+security_set_minimum_password_lifetime: no                   # V-71927
+security_set_maximum_password_lifetime: no                   # V-71931
+# Minimum UID for interactive accounts
+security_interactive_user_minimum_uid: 1000
+# Disallow logins from accounts with blank/null passwords via PAM.
+security_disallow_blank_password_login: 'yes'                  # V-71937
+# Apply password quality rules.
+# NOTE: The security_pwquality_apply_rules variable is a "master switch".
+# Set the 'security_pwquality_apply_rules' variable to 'yes' to apply all of
+# the password quality rules. Each rule can be disabled with a value of 'no'.
+security_pwquality_apply_rules: 'yes'
+security_pwquality_require_uppercase: 'yes'                    # V-71903
+security_pwquality_require_lowercase: 'yes'                    # V-71905
+security_pwquality_require_numeric: 'yes'                      # V-71907
+security_pwquality_require_special: 'yes'                      # V-71909
+security_pwquality_require_characters_changed: 'yes'           # V-71911
+security_pwquality_require_character_classes_changed: 'yes'    # V-71913
+security_pwquality_limit_repeated_characters: 'yes'            # V-71915
+security_pwquality_limit_repeated_character_classes: 'yes'     # V-71917
+security_pwquality_require_minimum_password_length: 'yes'      # V-71935
+# Use pwquality when passwords are changed or established.
+security_enable_pwquality_password_set: 'yes'                   # V-73159
+# Ensure passwords are stored using SHA512.
+security_password_encrypt_method: SHA512                     # V-71921
+# Ensure user/group admin utilities only store encrypted passwords.
+security_libuser_crypt_style_sha512: 'yes'                     # V-71923
+# Set a minimum/maximum lifetime limit for user passwords.
+security_password_min_lifetime_days: 1                      # V-71925
+security_password_max_lifetime_days: 90                     # V-71929
+security_password_min_length: 15                            # CCE-27123-9
+# Set a delay (in seconds) between failed login attempts.
+security_shadow_utils_fail_delay: 4                          # V-71951
+# Set a umask for all authenticated users.
+security_shadow_utils_umask: '077'                         # V-71995
+# Create home directories for new users by default.
+security_shadow_utils_create_home: 'yes'                       # V-72013
+# How many old user password to remember to prevent password re-use.
+security_password_remember_password: 5                      # V-71933
+# Disable user accounts if the password expires.
+security_disable_account_if_password_expires: 'yes'             # V-71941
+# Lock user accounts with excessive login failures. See documentation.
+security_pam_faillock_enable: 'yes'        # V-71945 / V-71943 / RHEL-07-010373
+security_pam_faillock_interval: 900
+security_pam_faillock_attempts: 3
+security_pam_faillock_deny_root: 'yes'                         # RHEL-07-010373
+security_pam_faillock_unlock_time: 'never'                     # V-71943
+# Limit the number of concurrent connections per account.
+security_rhel7_concurrent_session_limit: 10                 # V-72217
+# Disable creation of core dumps.
+security_rhel7_core_limit: 0                                # V-72057
+# Remove .shosts and shosts.equiv files.
+security_rhel7_remove_shosts_files: 'yes'                       # V-72277
+# Remove /etc/hosts.equiv file.
+security_rhel7_remove_hosts_equiv_file: 'yes'                       # V-72277
+# Remove .rhosts files.
+security_rhel7_remove_rhosts_files: 'yes'                       # V-72277
+security_rhel7_auth_root_ttys:
+  - console
+  - vc/1
+  - vc/2
+  - tty1
+  - tty2
+  - tty3
+security_rhel7_init_prompt: 'True'
+security_rhel7_init_single: 'True'
+security_password_sha512_check: 'True'

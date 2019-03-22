@@ -1,0 +1,227 @@
+---
+- name: Get user data for all users on the system
+  get_users:
+    min_uid: 0
+  register: user_list
+  check_mode: 'no'
+  tags:
+    - always
+
+- name: Get user data for all interactive users on the system
+  get_users:
+    min_uid: "{{ security_interactive_user_minimum_uid }}"
+  register: interactive_user_list
+  check_mode: no
+  tags:
+    - always
+
+# NOTE(mhayden): The "is mapping" check is required below because some users
+# may be attached to a Kerberos realm and they may not have shadow data on the
+# system. See bug 1659232 for more details.
+- name: Set minimum password lifetime limit to 24 hours for interactive accounts
+  shell: "chage -m 1 {{ item.name }}"
+  args:
+    warn: no
+  when:
+    - item.shadow is mapping
+    - item.shadow.min_days != 1
+    - security_set_minimum_password_lifetime | bool
+  with_items:
+    - "{{ interactive_user_list.users }}"
+  tags:
+    - accounts
+    - medium
+    - V-71927
+
+# NOTE(mhayden): The "is mapping" check is required below because some users
+# may be attached to a Kerberos realm and they may not have shadow data on the
+# system. See bug 1659232 for more details.
+- name: Set maximum password lifetime limit to 60 days for interactive accounts
+  shell: "chage -M 60 {{ item.name }}"
+  args:
+    warn: no
+  when:
+    - item.shadow is mapping
+    - item.shadow.max_days > 60
+    - security_set_maximum_password_lifetime | bool
+  with_items:
+    - "{{ interactive_user_list.users }}"
+  tags:
+    - accounts
+    - medium
+    - V-71931
+
+# FIXME: templating is broken
+- name: Print warning for not locked system accounts
+  debug:
+    msg: |
+      *************** WARNING ***************
+      The following system accounts are not locked:
+      {% for user in user_list.users %}
+      {%   if user['uid'] < 999 and user['uid'] != 0 %}
+      {%     if user['shadow']['state'] not in '*' %}
+      {{   user['name'] }}
+      {%      endif %}
+      {%   endif %}
+      {% endfor %}
+  tags:
+    - accounts
+    - medium
+    - V-71931
+    - foo
+
+- name: Print warning for groups in /etc/passwd that are not in /etc/group
+  # yamllint disable rule:line-length
+  debug:
+    msg: |
+      *************** WARNING ***************
+      The following users have GIDs in /etc/passwd
+      that do not exist in /etc/group:
+      {{ user_list.users | selectattr('group', 'equalto', False) | map(attribute='name') | join(', ') }}
+  when:
+    - user_list is defined
+    - user_list.users | selectattr('group', 'equalto', False) | list | length > 0
+  # yamllint enable rule:line-length
+  tags:
+    - accounts
+    - low
+    - V-72003
+
+- name: Get all accounts with UID 0
+  shell: "awk -F: '$3 == 0 {print $1}' /etc/passwd"
+  changed_when: 'False'
+  check_mode: 'no'
+  register: root_user_check
+  tags:
+    - accounts
+    - high
+    - V-72005
+    - skip_ansible_lint
+
+- name: Fail if non-root users with UID 0 are found
+  fail:
+    msg: |
+      *************** WARNING ***************
+      Only the 'root' user should have UID 0.
+      Other users were found:
+      {{ root_user_check.stdout_lines | join(', ') }}
+  when:
+    - root_user_check.stdout != 'root'
+  tags:
+    - accounts
+    - high
+    - V-72005
+
+# yamllint disable rule:line-length
+- name: Print warning for local interactive users without a home directory assigned
+  debug:
+    msg: |
+      *************** WARNING ***************
+      The following users do not have a home directory assigned:
+      {{ user_list.users | selectattr('dir', 'equalto', '') | map(attribute='name') | join(', ') }}
+  when:
+    - user_list is defined
+    - user_list.users | selectattr('dir', 'equalto', '') | map(attribute='name') | list | length > 0
+  # yamllint enable rule:line-length
+  tags:
+    - accounts
+    - medium
+    - V-72011
+
+- name: Check each user to see if its home directory exists on the filesystem
+  stat:
+    path: "{{ item['dir'] }}"
+  when:
+    - item['dir'] != ''
+  with_items: "{{ user_list.users }}"
+  register: home_directory_checks
+  no_log: 'True'
+  tags:
+    - accounts
+    - medium
+    - V-72015
+
+# yamllint disable rule:line-length
+- name: Print warning for users with an assigned home directory that does not exist
+  debug:
+    msg: |
+      *************** WARNING ***************
+      These users have a home directory assigned,
+      but the directory does not exist:
+      {% for check in home_directory_checks.results %}
+      {% if not check.stat.exists %}
+      {{ check.item.name }} ({{ check.item.dir }} does not exist)
+      {% endif %}
+      {% endfor %}
+  when:
+    - home_directory_checks.results | selectattr('stat.exists', 'sameas', false) | list | length > 0
+  # yamllint enable rule:line-length
+  tags:
+    - accounts
+    - medium
+    - V-72015
+
+- name: Check for 'nopasswd' in sudoers files
+  # yamllint disable-line rule:line-length
+  shell: grep -ir nopasswd /etc/sudoers /etc/sudoers.d/ | grep -Pv '/etc/sudoers(|.d/[\w]*):[ \t]*#' || echo 'not found'
+  register: sudoers_nopasswd_check
+  changed_when: 'False'
+  tags:
+    - auth
+    - medium
+    - V-71947
+
+- name: Users must provide a password for privilege escalation.
+  debug:
+    msg: |
+      *************** WARNING ***************
+      The 'NOPASSWD' directive was found in the sudoers configuration files.
+      Remove the directive to ensure that all users must provide a password
+      to run commands as the root user.
+      {{ sudoers_nopasswd_check.stdout_lines | join(', ') }}
+  when:
+    - not sudoers_nopasswd_check is skipped
+    - sudoers_nopasswd_check.stdout != 'not found'
+  tags:
+    - auth
+    - medium
+    - V-71947
+    - skip_ansible_lint
+
+- name: Check for '!authenticate' in sudoers files
+  # yamllint disable-line rule:line-length
+  shell: grep -ir '\!authenticate' /etc/sudoers /etc/sudoers.d/ | grep -Pv '/etc/sudoers(|.d/[\w]*):[ \t]*#' || echo 'not found'
+  register: sudoers_authenticate_check
+  changed_when: 'False'
+  tags:
+    - auth
+    - medium
+    - V-71949
+
+- name: Users must re-authenticate for privilege escalation.
+  debug:
+    msg: |
+      *************** WARNING ***************
+      The '!authenticate' directive was found in the sudoers configuration
+      files. Remove the directive to ensure that all users must provide a
+      password to run commands as the root user each time they use sudo.
+      {{ sudoers_authenticate_check.stdout_lines | join(', ') }}
+  when:
+    - not sudoers_authenticate_check is skipped
+    - sudoers_authenticate_check.stdout != 'not found'
+  tags:
+    - auth
+    - medium
+    - V-71949
+    - skip_ansible_lint
+
+# NOTE: the following checks are severe enough to fail instead of just warn
+- name: root's PATH should not have an empty element in it
+  assert:
+    that: "not lookup('env', 'PATH') | regex_findall('^:|::|:$')"
+    msg: "WARNING: root's PATH should not have an empty element in it."
+
+- name: root's PATH should not have a dot in it
+  assert:
+    that: "not lookup('env', 'PATH') | regex_findall('^[.]|:[.]+:|[.]$')"
+    msg: "WARNING: root's PATH should not have a dot in it."

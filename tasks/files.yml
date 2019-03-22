@@ -1,0 +1,202 @@
+---
+- name: Ensure critical files have appropriate permissions and security context
+  file:
+    path: "{{ item.path }}"
+    state: file
+    owner: 0
+    group: 0
+    mode: "{{ item.mode }}"
+    seuser: system_u
+    serole: object_r
+    setype: "{{ item.seltype }}"
+    selevel: s0
+    backup: 'yes'
+  with_items:
+    - {path: '/etc/passwd', mode: '0644', seltype: 'passwd_file_t'}
+    - {path: '/etc/group', mode: '0644', seltype: 'passwd_file_t'}
+    - {path: '/etc/shadow', mode: '0000', seltype: 'shadow_t'}
+    - {path: '/etc/gshadow', mode: '0000', seltype: 'shadow_t'}
+  tags:
+    - auth
+    - high
+    - always
+
+- name: Ensure authconfig uses pwquality and SHA512 to store passwords
+  lineinfile:
+    dest: /etc/sysconfig/authconfig
+    create: 'True'
+    state: present
+    group: 0
+    mode: 0644
+    owner: 0
+    seuser: system_u
+    serole: object_r
+    setype: etc_t
+    selevel: s0
+    backup: 'yes'
+    line: "{{ item }}"
+  with_items:
+    - 'PASSWDALGORITHM=sha512'
+    - 'USEPWQUALITY=yes'
+
+- name: Ensure libuser is storing passwords using SHA512
+  ini_file:
+    dest: /etc/libuser.conf
+    group: root
+    mode: 0644
+    owner: root
+    seuser: system_u
+    serole: object_r
+    setype: etc_t
+    selevel: s0
+    section: defaults
+    option: crypt_style
+    value: sha512
+    backup: 'yes'
+  when:
+    - security_libuser_crypt_style_sha512 | bool
+  tags:
+    - accounts
+    - medium
+    - V-71923
+
+- name: Ensure accounts are disabled if the password expires
+  lineinfile:
+    dest: /etc/default/useradd
+    group: root
+    mode: 0644
+    owner: root
+    seuser: system_u
+    serole: object_r
+    setype: etc_t
+    selevel: s0
+    regexp: '^[#\s]*INACTIVE'
+    line: 'INACTIVE=0'
+  when:
+    - security_disable_account_if_password_expires | bool
+  tags:
+    - accounts
+    - medium
+    - V-71941
+
+- name: Apply shadow-utils configurations
+  lineinfile:
+    dest: /etc/login.defs
+    group: root
+    mode: 0644
+    owner: root
+    seuser: system_u
+    serole: object_r
+    setype: etc_t
+    selevel: s0
+    regexp: "^{{ item.parameter }}"
+    line: "{{ item.parameter }} {{ item.value }}"
+    state: present
+  when:
+    - item.value != ''
+  with_items: "{{ shadow_utils_rhel7 }}"
+  tags:
+    - accounts
+    - medium
+    - V-71921
+    - V-71925
+    - V-71929
+    - V-71951
+    - V-71995
+    - V-72013
+
+- name: create securetty
+  template:
+    src: securetty.j2
+    dest: /etc/securetty
+    owner: root
+    group: root
+    mode: 0400
+    seuser: system_u
+    serole: object_r
+    setype: etc_runtime_t
+    selevel: s0
+    backup: 'yes'
+
+- name: NSA 2.2.4.1 Set daemon umask
+  template:
+    src: 'sysconfig_init.j2'
+    dest: '/etc/sysconfig/init'
+    owner: root
+    group: root
+    mode: 0644
+    seuser: system_u
+    serole: object_r
+    setype: bin_t
+    selevel: s0
+    backup: 'yes'
+
+- name: Check for .shosts or shosts.equiv files
+  find:
+    paths: /
+    recurse: 'yes'
+    hidden: 'yes'
+    patterns: '.shosts,shosts.equiv'
+  register: shosts_find
+  when:
+    - security_rhel7_remove_shosts_files | bool
+  tags:
+    - high
+    - auth
+    - V-72277
+    - V-72279
+
+- name: Delete .shosts or shosts.equiv files
+  file:
+    path: "{{ item.path }}"
+    state: absent
+  with_items: "{{ shosts_find.files }}"
+  when:
+    - security_rhel7_remove_shosts_files | bool
+    - shosts_find is defined
+    - shosts_find.files is defined
+  tags:
+    - high
+    - auth
+    - V-72277
+    - V-72279
+
+- name: Delete hosts.equiv from system | DTAG SEC Req 3.21-4
+  file:
+    dest: '/etc/hosts.equiv'
+    state: absent
+  when:
+    - security_rhel7_remove_hosts_equiv_file | bool
+  tags:
+    - high
+    - auth
+    - V-72277
+    - V-72279
+
+# TODO: modify to use the 'get_users' module
+- name: Get user accounts | DTAG SEC Req 3.21-4
+  command: "awk -F: '{print $1}' /etc/passwd"
+  changed_when: 'False'
+  check_mode: 'no'
+  register: users
+  when:
+    - security_rhel7_remove_rhosts_files | bool
+  tags:
+    - high
+    - auth
+    - V-72277
+    - V-72279
+
+# TODO: modify to use the 'get_users' module
+- name: Delete rhosts-files from system | DTAG SEC Req 3.21-4
+  file:
+    dest: '~{{ item }}/.rhosts'
+    state: absent
+  with_items: '{{ users.stdout_lines | default(omit) }}'
+  when:
+    - security_rhel7_remove_rhosts_files | bool
+  tags:
+    - high
+    - auth
+    - V-72277
+    - V-72279

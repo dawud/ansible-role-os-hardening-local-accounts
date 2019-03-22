@@ -1,0 +1,59 @@
+---
+- name: Create limits.d directory if it does not exist
+  file:
+    path: '/etc/security/limits.d'
+    state: directory
+    group: root
+    mode: 0755
+    owner: root
+    seuser: system_u
+    serole: object_r
+    setype: etc_t
+    selevel: s0
+
+# NOTE: pam_limits won't create the file and using comments is broken
+- name: Create files for custom configuration
+  lineinfile:
+    path: "/etc/security/limits.d/{{ item }}"
+    create: 'True'
+    state: present
+    line: "# File managed by Ansible"
+    insertbefore: 'BOF'
+    group: root
+    mode: 0644
+    owner: root
+    seuser: system_u
+    serole: object_r
+    setype: etc_t
+    selevel: s0
+  with_items:
+    - 99-ansible-security-core.conf
+    - 99-ansible-security-maxlogins.conf
+
+- name: Kernel core dumps must be disabled unless needed
+  pam_limits:
+    dest: /etc/security/limits.d/99-ansible-security-core.conf
+    domain: '*'
+    limit_type: '-'
+    limit_item: core
+    value: "{{ security_rhel7_core_limit }}"
+  when:
+    - security_rhel7_core_limit is defined
+  tags:
+    - kernel
+    - medium
+    - V-72057
+
+- name: Limit concurrent sessions for all accounts/types
+  pam_limits:
+    dest: /etc/security/limits.d/99-ansible-security-maxlogins.conf
+    domain: '*'
+    limit_type: 'hard'
+    limit_item: maxlogins
+    value: "{{ security_rhel7_concurrent_session_limit }}"
+  when:
+    - security_rhel7_concurrent_session_limit is defined
+  tags:
+    - auth
+    - low
+    - V-72217

@@ -1,0 +1,62 @@
+---
+- name: Check if /etc/security/pwquality.conf exists
+  stat:
+    path: /etc/security/pwquality.conf
+  check_mode: 'no'
+  register: pwquality_config_check
+  tags:
+    - always
+
+- name: Check if /etc/security/pwquality.conf exists
+  assert:
+    that: pwquality_config_check.stat.exists
+    msg: 'Configuration file for pwquality missing.'
+
+- name: Set password quality requirements
+  blockinfile:
+    dest: /etc/security/pwquality.conf
+    group: root
+    mode: 0644
+    owner: root
+    seuser: system_u
+    serole: object_r
+    setype: etc_t
+    selevel: s0
+    backup: 'yes'
+    insertbefore: EOF
+    # yamllint disable-line rule:line-length
+    marker: "# {mark} Added by ansible-role-os-hardening-local-accounts security role"
+    state: present
+    block: "{{ lookup('template', 'pwquality.conf.j2') }}"
+  when:
+    - pwquality_config_check.stat.exists
+  tags:
+    - accounts
+    - medium
+    - V-71903
+    - V-71905
+    - V-71907
+    - V-71909
+    - V-71911
+    - V-71913
+    - V-71915
+    - V-71917
+    - V-71935
+
+- name: Use pwquality when passwords are changed or created
+  pamd:
+    name: passwd
+    type: password
+    control: substack
+    module_path: postlogin
+    new_type: password
+    new_control: required
+    new_module_path: pam_pwquality.so
+    module_arguments: 'retry=3'
+    state: before
+  when:
+    - security_enable_pwquality_password_set | bool
+  tags:
+    - accounts
+    - medium
+    - V-73159
